@@ -17,6 +17,7 @@ from forms import *
 from flask_migrate import Migrate
 import sys
 from utils import fix_json_array
+from models import Venue,Shows,Artist,db
 #----------------------------------------------------------------------------#
 # App Config.
 #----------------------------------------------------------------------------#
@@ -24,7 +25,7 @@ from utils import fix_json_array
 app = Flask(__name__)
 moment = Moment(app)
 app.config.from_object('config')
-db = SQLAlchemy(app)
+db.init_app(app)
 migrate = Migrate(app,db)
 
 # TODO: OK | connect to a local postgresql database
@@ -38,56 +39,6 @@ migrate = Migrate(app,db)
 
 # from create show form it can be seen that only id's are needed to be connected, 
 # it's basically a many to many relationship from last few lessons
-Shows = db.Table('Shows', db.Model.metadata,
-    db.Column('Venue_id', db.Integer, db.ForeignKey('Venue.id')),
-    db.Column('Artist_id', db.Integer, db.ForeignKey('Artist.id')),
-    db.Column('start_time', db.DateTime))
-
-class Venue(db.Model):
-    __tablename__ = 'Venue'
-
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String)
-    city = db.Column(db.String(120))
-    state = db.Column(db.String(120))
-    address = db.Column(db.String(120))
-    phone = db.Column(db.String(120))
-    image_link = db.Column(db.String(500))
-    facebook_link = db.Column(db.String(120))
-    
-
-    # TODO: OK | implement any missing fields, as a database migration using Flask-Migrate
-    genres = db.Column(db.ARRAY(db.String()),nullable=False)  # for genres 
-    talent_required = db.Column(db.Boolean, nullable=False, default=False) # Looking for Talent checkbox
-    seeking_description = db.Column(db.String(300)) # Description box
-    website_link = db.Column(db.String(120))
-    artists = db.relationship('Artist', secondary=Shows,backref=db.backref('venues', lazy=True))
-
-    def __repr__(self):
-        return '<Venue Id:{} , Name: {}>'.format(self.id, self.name)
-
-class Artist(db.Model):
-    __tablename__ = 'Artist'
-
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String)
-    city = db.Column(db.String(120))
-    state = db.Column(db.String(120))
-    phone = db.Column(db.String(120))
-    genres = db.Column(db.ARRAY(db.String())) #db.Column(db.String(120)) ,,, # easier this way
-    image_link = db.Column(db.String(500))
-    facebook_link = db.Column(db.String(120))
-
-    # TODO: OK | implement any missing fields, as a database migration using Flask-Migrate
-    venue_required = db.Column(db.Boolean, nullable=False, default=False)
-    seeking_description = db.Column(db.String(300)) # Description box
-    website_link = db.Column(db.String(120))
-
-    def __repr__(self):
-        return '<Artist Id:{} , Name: {}>'.format(self.id, self.name)
-
-# TODO: OK | Implement Show and Artist models, and complete all model relationships and properties, as a database migration.
-
 
 
 #----------------------------------------------------------------------------#
@@ -194,26 +145,28 @@ def show_venue(venue_id):
   try:
     venue = Venue.query.get(venue_id)
     fix_json_array(venue,"genres")
-    venue.__dict__["seeking_venue"] = venue.talent_required
+    venue.__dict__["seeking_talent"] = venue.talent_required
     #venue.__dict__["genres"] = venue.genres
     data = venue.__dict__.copy()
-    past_shows_rows = db.session.query(Shows).filter(Shows.c.Venue_id == venue.id, datetime.now() > Shows.c.start_time ).all()
+    data['website'] = venue.website_link
+    
+    past_shows_rows = db.session.query(Artist,Shows.c.start_time).join(Shows).filter(Shows.c.Venue_id == venue.id, datetime.now() > Shows.c.start_time ).all()
     past_shows = []
     for past_show in past_shows_rows:
-      show = dict(past_show).copy()
-      show["artist_id"] = past_show.Artist_id
-      show["artist_name"] = Artist.query.get(past_show.Artist_id).name
-      show["venue_image_link"] = Artist.query.get(past_show.Artist_id).image_link
-      show["start_time"] = str(past_show.start_time)
+      show = {}#dict(past_show).copy()
+      show["artist_id"] = past_show[0].id
+      show["artist_name"] = past_show[0].name
+      show["venue_image_link"] = past_show[0].image_link
+      show["start_time"] = str(past_show[1])
       past_shows.append(show)
-    upcoming_shows_rows = db.session.query(Shows).filter(Shows.c.Venue_id == venue.id, datetime.now() < Shows.c.start_time ).all()
+    upcoming_shows_rows = db.session.query(Artist,Shows.c.start_time).join(Shows).filter(Shows.c.Venue_id == venue.id, datetime.now() < Shows.c.start_time ).all()
     upcoming_shows = []
     for upcoming_show in upcoming_shows_rows:
-      show = dict(upcoming_show).copy()
-      show["artist_id"] = upcoming_show.Artist_id
-      show["artist_name"] = Artist.query.get(upcoming_show.Artist_id).name
-      show["venue_image_link"] = Artist.query.get(upcoming_show.Artist_id).image_link
-      show["start_time"] = str(upcoming_show.start_time)
+      show = {}#upcoming_show.__dict__.copy()
+      show["artist_id"] = upcoming_show[0].id
+      show["artist_name"] = upcoming_show[0].name
+      show["venue_image_link"] = upcoming_show[0].image_link
+      show["start_time"] = str(upcoming_show[1])
       upcoming_shows.append(show)
     data["past_shows"] = past_shows
     data['upcoming_shows'] = upcoming_shows
@@ -222,6 +175,7 @@ def show_venue(venue_id):
     #print(artist.genres,type(artist.genres))
   except:
     print(sys.exc_info())
+    flash('No such venue found, you have entered wrong venue id')
     return render_template('errors/404.html')
   
   # data1={
@@ -418,36 +372,37 @@ def show_artist(artist_id):
   # TODO: replace with real artist data from the artist table, using artist_id
   try:
     artist = Artist.query.get(artist_id)
-    if artist == None:
-      return render_template('errors/404.html')
     fix_json_array(artist,"genres")
     artist.__dict__["seeking_venue"] = artist.venue_required
     artist.__dict__["genres"] = artist.genres
     data = artist.__dict__.copy()
-    past_shows_rows = db.session.query(Shows).filter(Shows.c.Artist_id == artist.id, datetime.now() > Shows.c.start_time ).all()
+    past_shows_rows = db.session.query(Venue,Shows.c.start_time).join(Shows).filter(Shows.c.Artist_id == artist.id, datetime.now() > Shows.c.start_time ).all()
     past_shows = []
     for past_show in past_shows_rows:
-      show = dict(past_show).copy()
-      show["venue_id"] = past_show.Venue_id
-      show["venue_name"] = Venue.query.get(past_show.Venue_id).name
-      show["venue_image_link"] = Venue.query.get(past_show.Venue_id).image_link
-      show["start_time"] = str(past_show.start_time)
+      show = {}#dict(past_show).copy()
+      show["venue_id"] = past_show[0].id
+      show["venue_name"] = past_show[0].name
+      show["venue_image_link"] = past_show[0].image_link
+      show["start_time"] = str(past_show[1])
       past_shows.append(show)
-    upcoming_shows_rows = db.session.query(Shows).filter(Shows.c.Artist_id == artist.id, datetime.now() < Shows.c.start_time ).all()
+    upcoming_shows_rows = db.session.query(Venue,Shows.c.start_time).join(Shows).filter(Shows.c.Artist_id == artist.id, datetime.now() < Shows.c.start_time ).all()
     upcoming_shows = []
     for upcoming_show in upcoming_shows_rows:
-      show = dict(upcoming_show).copy()
-      show["venue_id"] = upcoming_show.Venue_id
-      show["venue_name"] = Venue.query.get(upcoming_show.Venue_id).name
-      show["venue_image_link"] = Venue.query.get(upcoming_show.Venue_id).image_link
-      show["start_time"] = str(upcoming_show.start_time)
+      show = {}#dict(upcoming_show).copy()
+      show["venue_id"] = upcoming_show[0].id
+      show["venue_name"] = upcoming_show[0].name
+      show["venue_image_link"] = upcoming_show[0].image_link
+      show["start_time"] = str(upcoming_show[1])
       upcoming_shows.append(show)
+    print(upcoming_shows,past_shows)
+    data["website"] = artist.website_link
     data["past_shows"] = past_shows
     data['upcoming_shows'] = upcoming_shows
     data["past_shows_count"]= len(past_shows)
     data["upcoming_shows_count"] = len(upcoming_shows)
     #print(artist.genres,type(artist.genres))
   except:
+    flash('No such artist found, you have entered wrong artist id')
     print(sys.exc_info())
     return render_template('errors/404.html')
   
