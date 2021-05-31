@@ -38,9 +38,7 @@ def db_drop_and_create_all():
         title='water',
         recipe='[{"name": "water", "color": "blue", "parts": 1}]'
     )
-
-
-drink.insert()
+    drink.insert()
 # ROUTES
 
 '''
@@ -64,8 +62,9 @@ class Drink(db.Model):
     '''
 
     def short(self):
-        print(json.loads(self.recipe))
-        short_recipe = [{'color': r['color'], 'parts': r['parts']} for r in json.loads(self.recipe)]
+        str = self.recipe.replace("\'", "\"")
+        print(str)
+        short_recipe = [{'color': r['color'], 'parts': r['parts']} for r in json.loads(str)]
         return {
             'id': self.id,
             'title': self.title,
@@ -78,10 +77,12 @@ class Drink(db.Model):
     '''
 
     def long(self):
+        #print("recipe",self.recipe)
+        str = self.recipe.replace("\'", "\"")
         return {
             'id': self.id,
             'title': self.title,
-            'recipe': json.loads(self.recipe)
+            'recipe': json.loads(json.dumps(str))
         }
 
     '''
